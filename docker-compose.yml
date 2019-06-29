@@ -18,9 +18,7 @@ services:
     volumes:
       - ./flask/app:/app
       - ./postgres/tmp:/postgres/tmp
-    command: python /app/main.py
-    tty: true
-
+    command: python3 /app/main.py
 
   pgadmin:
     image: dpage/pgadmin4
