@@ -1,0 +1,79 @@
+version: '3'
+
+services:
+  client:
+    restart: always
+    build: ./client
+    env_file:
+      - tm.env
+    volumes:
+      - ./client/scripts:/scripts
+    command: bash /scripts/start.sh production
+
+  flask:
+    restart: always
+    build: ./flask
+    env_file:
+      - tm.env
+    volumes:
+      - ./flask/app:/app
+      - ./postgres/tmp:/postgres/tmp
+    command: python /app/main.py
+    tty: true
+
+
+  pgadmin:
+    image: dpage/pgadmin4
+    restart: always
+    ports:
+      - 3000:80
+    env_file:
+      - tm.env
+    volumes:
+      - /pgadmin/lib:/var/lib/pgadmin
+      - /pgadmin/config_local.py:/pgadmin4/config_local.py
+      - /pgadmin/servers.json:/pgadmin4/servers.json
+
+  postgres:
+    restart: always
+    image: mdillon/postgis:10
+    ports:
+      - 5432:5432
+    env_file:
+      - tm.env
+    volumes:
+      - ./postgres/data:/var/lib/postgresql/data
+      - ./postgres/tmp:/tmp
+
+  nginx:
+    restart: always
+    build: ./nginx
+    links:
+      - client
+    ports:
+     - "80:80"
+     - "443:443"
+    # command: service nginx start
+    volumes:
+      - ./nginx/ssl:/etc/letsencrypt/
+      - ./nginx/static/:/static
+      - ./nginx/tm-static/:/tm-static
+      - ./nginx/conf/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx/conf/default.conf:/etc/nginx/sites-available/default
+    command: nginx -g 'daemon off;'
+
+  # nodejs:
+  #   restart: always
+  #   build:
+  #     context: ./nodejs
+  #     dockerfile: ./Dockerfile
+  #   tty: true
+  #   ports:
+  #     - 26000:6000
+  #   env_file:
+  #     - tm.env
+  #   volumes:
+  #     - ./nodejs/tools:/tools
+  #     - ./data2:/tools/data2
+
+
