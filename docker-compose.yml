@@ -59,19 +59,3 @@ services:
       - ./nginx/conf/nginx.conf:/etc/nginx/nginx.conf
       - ./nginx/conf/default.conf:/etc/nginx/sites-available/default
     command: nginx -g 'daemon off;'
-
-  # nodejs:
-  #   restart: always
-  #   build:
-  #     context: ./nodejs
-  #     dockerfile: ./Dockerfile
-  #   tty: true
-  #   ports:
-  #     - 26000:6000
-  #   env_file:
-  #     - tm.env
-  #   volumes:
-  #     - ./nodejs/tools:/tools
-  #     - ./data2:/tools/data2
-
-
