@@ -1,10 +1,11 @@
-import json
-import os
-import subprocess
-import psycopg2
 from osgeo import ogr
 from shapely import wkb
+import json
+import os
+import psycopg2
+import subprocess
 import tempfile
+import tilebelt
 
 conn_string = "host='%s' dbname='%s' user='%s' password='%s'" % (
     os.environ['PGHOST'], os.environ['DRCOG_DB'], os.environ['PGUSER'], os.environ['PGPASSWORD'])
@@ -28,6 +29,7 @@ def query_db(query, params):
             conn.close()
         return result
 
+
 grid_query = '''
 SELECT
     roofprints.bldg_type,
@@ -39,36 +41,55 @@ SELECT
     roofprints.bldg_ht_m,
     roofprints.geom_4326
 FROM
-    rooftop.roofprints_osm_final roofprints JOIN
-        rooftop.grid_1000_4326 grid ON
-            ST_Contains(grid.geom, roofprints.geom_4326)
+    rooftop.roofprints_osm_final roofprints
 WHERE
-    (roofprints.building_part IS NULL) = %(get_multipart)s AND
-    grid.grid_row || '_' || grid.grid_colum = %(grid_id)s;
+    (roofprints.building_part IS NOT NULL) = %(get_multipart)s AND
+    grid_ref_1000m = (%(grid_y)s || '_' ||  %(grid_x)s)
 '''
 
+quad_query = '''
+SELECT
+    roofprints.bldg_type,
+    roofprints.housenumbr,
+    roofprints.city,
+    roofprints.street,
+    roofprints.state,
+    roofprints.zip,
+    roofprints.bldg_ht_m,
+    roofprints.geom_4326
+FROM
+    rooftop.roofprints_osm_final roofprints
+WHERE
+    (roofprints.building_part IS NOT NULL) = %(get_multipart)s AND
+    geom_4326 && ST_MakeEnvelope(%(xmin)s, %(ymin)s, %(xmax)s, %(ymax)s, 4326)
+'''
 
-def get_tile_multi_part(id):
-    return get_tile(id, False)
-
-def get_tile_single_part(id):
-    return get_tile(id, True)
-
-def get_tile(id, get_multipart):
+def get_tile(query_type, params):
     # Query the Database
-    obj = query_db(grid_query, {'grid_id': id, 'get_multipart': get_multipart})
+    params['get_multipart'] = params['multi'] == 'multi'
+    if query_type == 'grid':
+        obj = query_db(grid_query, params)
+    elif query_type == 'quadkey':
+        params['bbox'] = tilebelt.tile_to_bbox(tilebelt.quadkey_to_tile(params['quadkey']))
+        params['xmin'] = params['bbox'][0]
+        params['ymin'] = params['bbox'][1]
+        params['xmax'] = params['bbox'][2]
+        params['ymax'] = params['bbox'][3]
+        obj = query_db(quad_query, params)
+
     geom_column = 'geom_4326'
 
     # Create a geojson file
     geojson = {'type': 'FeatureCollection', 'features': []}
     for row in obj['rows']:
-        geojson_wrapper = {'type':'Feature','properties':{},'geometry':{}}
+        geojson_wrapper = {'type': 'Feature', 'properties': {}, 'geometry': {}}
         for i, column in enumerate(obj['description']):
             if column.name != geom_column:
                 geojson_wrapper['properties'][column.name] = row[i]
             else:
                 as_wkb = wkb.loads(row[i], hex=True)
-                as_geojson = ogr.CreateGeometryFromWkb(wkb.dumps(as_wkb)).ExportToJson()
+                as_geojson = ogr.CreateGeometryFromWkb(
+                    wkb.dumps(as_wkb)).ExportToJson()
                 geojson_wrapper['geometry'] = json.loads(as_geojson)
         geojson['features'].append(geojson_wrapper)
 
@@ -77,17 +98,19 @@ def get_tile(id, get_multipart):
     outfile_temp = tempfile.NamedTemporaryFile()
 
     # Create the command for ogr2osm
-    commandline = ('python3','/ogr2osm/ogr2osm.py', '-t', '/app/drcog_building_trans_pg.py', '/vsistdin/', '-o', outfile_temp.name, '-f')
+    commandline = ('python3', '/ogr2osm/ogr2osm.py', '-t',
+                   '/app/drcog_building_trans_pg.py', '/vsistdin/', '-o', outfile_temp.name, '-f')
 
-    #Run ogr2osm
-    process = subprocess.Popen(commandline, stdin=subprocess.PIPE, encoding='utf8')
+    # Run ogr2osm
+    process = subprocess.Popen(
+        commandline, stdin=subprocess.PIPE, encoding='utf8')
     process.communicate(json.dumps(geojson))
 
-    #Read the ogr2osm output into a variable
+    # Read the ogr2osm output into a variable
     osm_data = outfile_temp.read()
 
-    #Close and remove the temp file
+    # Close and remove the temp file
     outfile_temp.close()
 
-    #Return the osm
+    # Return the osm
     return osm_data
